@@ -1,0 +1,141 @@
+#!/usr/bin/env node
+
+'use strict';
+
+const asyncQueue = require('async/queue');
+const commander = require('commander');
+const fs = require('fs');
+const prettyMilliseconds = require('pretty-ms');
+const sprintf = require('locutus/php/strings/sprintf');
+const sqlite = require('sqlite');
+const round = require('locutus/php/math/round');
+
+commander.usage('source.mbtiles destination.mbtiles');
+commander.option('-r, --read-batch [value]');
+commander.option('-w, --write-concurrency [value]');
+commander.allowUnknownOption(false);
+
+commander.parse(process.argv);
+
+if (commander.args.length < 2) {
+	console.log(commander.helpInformation());
+	process.exit(1);
+}
+
+(async function () {
+	let sourceDatabase;
+	let destinationDatabase;
+
+	try {
+		const sourceDatabaseFile = commander.args[0];
+		const destinationDatabaseFile = commander.args[1];
+
+		const options = commander.opts();
+
+		const readBatch = options['read-batch'] ? options['read-batch'] : 1;
+		const writeConcurrency = options['write-concurrency'] ? options['write-concurrency'] : 1;
+
+		if (!fs.existsSync(sourceDatabaseFile)) {
+			throw new Error(sprintf('File %s does not exist.', sourceDatabaseFile));
+		}
+
+		if (!fs.existsSync(destinationDatabaseFile)) {
+			throw new Error(sprintf('File %s does not exist.', destinationDatabaseFile));
+		}
+
+		[sourceDatabase, destinationDatabase] = await Promise.all([
+			sqlite.open(sourceDatabaseFile, { Promise }),
+			sqlite.open(destinationDatabaseFile, { Promise })
+		]);
+
+		const result = await sourceDatabase.get('SELECT COUNT(*) as tileCount FROM map');
+
+		const tileCount = result.tileCount;
+		const pageCount = Math.ceil(tileCount / readBatch);
+
+		let processedTileCount = 0;
+		const startTimeMilliseconds = (new Date()).getTime();
+
+		const writeQueue = asyncQueue(async (task) => {
+			try {
+				const imageInsertPromise = destinationDatabase.run(
+					'INSERT OR IGNORE INTO images (tile_id, tile_data) VALUES (?, ?)',
+					task.data.tile_id,
+					task.data.tile_data
+				);
+
+				const mapInsertPromise = destinationDatabase.run(
+					'INSERT OR REPLACE INTO map (zoom_level, tile_column, tile_row, tile_id) VALUES (?, ?, ?, ?)',
+					task.data.zoom_level,
+					task.data.tile_column,
+					task.data.tile_row,
+					task.data.tile_id,
+				);
+
+				await Promise.all([
+					imageInsertPromise,
+					mapInsertPromise,
+				]);
+
+				processedTileCount++;
+				const elapsedMilliseconds = (new Date()).getTime() - startTimeMilliseconds;
+
+				console.log(sprintf(
+					'[%s] %d/%d (%s %%) | %s left',
+					prettyMilliseconds(elapsedMilliseconds),
+					processedTileCount,
+					tileCount,
+					round(processedTileCount / tileCount * 100, 1),
+					prettyMilliseconds(elapsedMilliseconds / processedTileCount * (tileCount - processedTileCount))
+				));
+			} catch (error) {
+				console.log(error);
+			}
+		}, writeConcurrency);
+
+		const readQueue = asyncQueue(async (task) => {
+			try {
+				const tileResults = await sourceDatabase.all(
+					'SELECT'
+					+ ' map.zoom_level AS zoom_level,'
+					+ ' map.tile_column AS tile_column,'
+					+ ' map.tile_row AS tile_row,'
+					+ ' map.tile_id AS tile_id,'
+					+ 'images.tile_data AS tile_data'
+					+ ' FROM map'
+					+ ' JOIN images ON images.tile_id = map.tile_id'
+					+ ' ORDER BY map.zoom_level, map.tile_column, map.tile_row'
+					+ ' LIMIT ?'
+					+ ' OFFSET ?',
+					readBatch,
+					task.page * readBatch
+				);
+
+				for (let i = 0; i < tileResults.length; i++) {
+					writeQueue.push({data: tileResults[i]});
+				}
+
+			} catch (error) {
+				console.log(error);
+			}
+		}, 1);
+
+		for (let i = 0; i < pageCount; i++) {
+			readQueue.push({page: i});
+		}
+
+		await readQueue.drain();
+		await writeQueue.drain();
+
+	} catch (error) {
+		console.log(error.message);
+		process.exit(1);
+	} finally {
+		if (sourceDatabase) {
+			sourceDatabase.close();
+		}
+		if (destinationDatabase) {
+			destinationDatabase.close();
+		}
+	}
+})();
