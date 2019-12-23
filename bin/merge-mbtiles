@@ -32,8 +32,8 @@ if (commander.args.length < 2) {
 
 		const options = commander.opts();
 
-		const readBatch = options['read-batch'] ? options['read-batch'] : 1;
-		const writeConcurrency = options['write-concurrency'] ? options['write-concurrency'] : 1;
+		const readBatch = options['readBatch'] ? Number.parseInt(options['readBatch'], 10) : 1;
+		const writeConcurrency = options['writeConcurrency'] ? Number.parseInt(options['writeConcurrency'], 10) : 1;
 
 		if (!fs.existsSync(sourceDatabaseFile)) {
 			throw new Error(sprintf('File %s does not exist.', sourceDatabaseFile));
