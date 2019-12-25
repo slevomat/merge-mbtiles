@@ -51,7 +51,7 @@ if (commander.args.length < 2) {
 		const result = await sourceDatabase.get('SELECT COUNT(*) as tileCount FROM map');
 
 		const tileCount = result.tileCount;
-		const pageCount = Math.ceil(tileCount / readBatch);
+		const pageCount = Math.floor(tileCount / readBatch) + 1;
 
 		let processedTileCount = 0;
 		const startTimeMilliseconds = (new Date()).getTime();
