@@ -56,6 +56,19 @@ if (commander.args.length < 2) {
 		let processedTileCount = 0;
 		const startTimeMilliseconds = (new Date()).getTime();
 
+		const printProgressBar = () => {
+			const elapsedMilliseconds = (new Date()).getTime() - startTimeMilliseconds;
+
+			console.log(sprintf(
+				'[%s] %d/%d (%s %%) | %s left',
+				prettyMilliseconds(elapsedMilliseconds),
+				processedTileCount,
+				tileCount,
+				round(processedTileCount / tileCount * 100, 1),
+				prettyMilliseconds(elapsedMilliseconds / processedTileCount * (tileCount - processedTileCount))
+			));
+		};
+
 		const writeQueue = asyncQueue(async (task) => {
 			try {
 				const imageInsertPromise = destinationDatabase.run(
@@ -78,16 +91,12 @@ if (commander.args.length < 2) {
 				]);
 
 				processedTileCount++;
-				const elapsedMilliseconds = (new Date()).getTime() - startTimeMilliseconds;
 
-				console.log(sprintf(
-					'[%s] %d/%d (%s %%) | %s left',
-					prettyMilliseconds(elapsedMilliseconds),
-					processedTileCount,
-					tileCount,
-					round(processedTileCount / tileCount * 100, 1),
-					prettyMilliseconds(elapsedMilliseconds / processedTileCount * (tileCount - processedTileCount))
-				));
+				if (processedTileCount % 1000 !== 0) {
+					return;
+				}
+
+				printProgressBar();
 			} catch (error) {
 				console.log(error);
 			}
@@ -120,12 +129,20 @@ if (commander.args.length < 2) {
 			}
 		}, 1);
 
+		console.log(sprintf(
+			'%d/%d',
+			processedTileCount,
+			tileCount
+		));
+
 		for (let i = 0; i < pageCount; i++) {
 			readQueue.push({page: i});
 		}
 
 		await readQueue.drain();
 		await writeQueue.drain();
+
+		printProgressBar();
 
 	} catch (error) {
 		console.log(error.message);
