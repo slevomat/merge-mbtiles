@@ -8,6 +8,7 @@ const fs = require('fs');
 const prettyMilliseconds = require('pretty-ms');
 const sprintf = require('locutus/php/strings/sprintf');
 const sqlite = require('sqlite');
+const sqlite3 = require('sqlite3');
 const round = require('locutus/php/math/round');
 
 commander.usage('source.mbtiles destination.mbtiles');
@@ -44,8 +45,8 @@ if (commander.args.length < 2) {
 		}
 
 		[sourceDatabase, destinationDatabase] = await Promise.all([
-			sqlite.open(sourceDatabaseFile, { Promise }),
-			sqlite.open(destinationDatabaseFile, { Promise })
+			sqlite.open({filename: sourceDatabaseFile, driver: sqlite3.Database}, { Promise }),
+			sqlite.open({filename: destinationDatabaseFile, driver: sqlite3.Database}, { Promise })
 		]);
 
 		const result = await sourceDatabase.get('SELECT COUNT(*) as tileCount FROM map');
